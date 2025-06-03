@@ -12,7 +12,7 @@ double time_elapsed = 0.0;
 
 geometry_msgs::Pose2D current_pose;
 geometry_msgs::Pose2D prev_pose;
-float prev_left_distance = 0.0;
+float prev_right_distance = 0.0;
 
 ros::Time correction_timer;
 double correction_interval = 1.0;
@@ -81,8 +81,8 @@ float computeCorrectionAngle() {
     float dx = current_pose.x - prev_pose.x;
     float dy = current_pose.y - prev_pose.y;
     float heading_angle = atan2(dy, dx);
-    float delta_dist = regions["left"] - prev_left_distance;
-    float wall_angle = heading_angle + atan2(delta_dist, sqrt(dx * dx + dy * dy));
+    float delta_dist = regions["right"] - prev_right_distance;
+    float wall_angle = heading_angle - atan2(delta_dist, sqrt(dx * dx + dy * dy));
     float desired_angle = current_pose.theta;
     float angle_error = wall_angle - desired_angle;
     while (angle_error > M_PI) angle_error -= 2 * M_PI;
@@ -98,7 +98,7 @@ void follow_wall() {
         float angle_correction = computeCorrectionAngle();
         move.angular.z = angle_correction;
         prev_pose = current_pose;
-        prev_left_distance = regions["left"];
+        prev_right_distance = regions["right"];
         correction_timer = ros::Time::now();
     } else {
         move.angular.z = 0.0;
