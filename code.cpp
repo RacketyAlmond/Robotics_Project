@@ -11,6 +11,11 @@ ros::Time state_timer;
 double time_elapsed = 0.0;
 
 geometry_msgs::Pose2D current_pose;
+geometry_msgs::Pose2D prev_pose;
+float prev_left_distance = 0.0;
+
+ros::Time correction_timer;
+double correction_interval = 1.0;
 
 enum State { FORWARD, TURN_LEFT, TURN_RIGHT };
 
@@ -27,13 +32,11 @@ float min(float a, float b) { return (a < b) ? a : b; }
 
 float min(const std::vector<float>& range, int mid, int offset) {
     float min_value = std::numeric_limits<float>::infinity();
-
-    for (int i = mid-offset; i <= mid+offset; ++i) {
+    for (int i = mid - offset; i <= mid + offset; ++i) {
         if (std::isfinite(range[i]) and range[i] != 0) {
             min_value = min(min_value, range[i]);
         }
     }
-
     return min_value;
 }
 
@@ -42,21 +45,18 @@ float avg(float a, float b) { return (a + b) / 2; }
 float avg(const std::vector<float>& range, int mid, int offset) {
     float sum = 0.0;
     int count = 0;
-
-    for (int i = mid-offset; i <= mid+offset; ++i) {
+    for (int i = mid - offset; i <= mid + offset; ++i) {
         if (std::isfinite(range[i]) and range[i] != 0) {
             sum += range[i];
             ++count;
         }
     }
-
     return sum / count;
 }
 
 void odomCallback(const nav_msgs::OdometryConstPtr& msg) {
     current_pose.x = msg->pose.pose.position.x;
     current_pose.y = msg->pose.pose.position.y;
-
     tf::Quaternion q(
         msg->pose.pose.orientation.x,
         msg->pose.pose.orientation.y,
@@ -71,79 +71,54 @@ void odomCallback(const nav_msgs::OdometryConstPtr& msg) {
 
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     const std::vector<float>& ranges = msg->ranges;
-
-    //regions["right"] = avg(ranges, 248, 292); //msg->ranges[270];
-    //regions["fright"] = avg(ranges, 293, 337); //msg->ranges[315];
-    //regions["front"] = avg(avg(ranges, 338, 359), avg(ranges, 0, 22)); //msg->ranges[0];
-    //regions["fleft"] = avg(ranges, 23, 67); //msg->ranges[45];
-    //regions["left"] = avg(ranges, 68, 112); //msg->ranges[90];
-
     regions["right"] = min(ranges, 270, 70);
     regions["left"] = min(ranges, 90, 70);
     regions["front"] = min(min(ranges, 15, 15), min(ranges, 345, 15));
-
     ROS_INFO("front:%f, right:%f, left:%f", regions["front"], regions["right"], regions["left"]);
 }
 
-void changeState(State new_state) {
-    state = new_state;
-    state_timer = ros::Time::now();
+float computeCorrectionAngle() {
+    float dx = current_pose.x - prev_pose.x;
+    float dy = current_pose.y - prev_pose.y;
+    float heading_angle = atan2(dy, dx);
+    float delta_dist = regions["left"] - prev_left_distance;
+    float wall_angle = heading_angle + atan2(delta_dist, sqrt(dx * dx + dy * dy));
+    float desired_angle = current_pose.theta;
+    float angle_error = wall_angle - desired_angle;
+    while (angle_error > M_PI) angle_error -= 2 * M_PI;
+    while (angle_error < -M_PI) angle_error += 2 * M_PI;
+    return angle_error;
 }
 
 void follow_wall() {
     geometry_msgs::Twist move;
-
-    move.linear.x = 0.1;
-
-    switch (state) {
-        case FORWARD:
-            if (time_elapsed < 1) {
-
-            }
-            else if (regions["right"] > wall_dist + tolerance || regions["left"] < wall_dist - tolerance) {
-                changeState(TURN_RIGHT);
-            }
-            else if (regions["right"] < wall_dist - tolerance) {
-                changeState(TURN_LEFT);
-            }
-            break;
-
-        case TURN_LEFT:
-            if (time_elapsed < 0.2) move.angular.z = 0.4;
-            else changeState(FORWARD);
-            break;
-
-        case TURN_RIGHT:
-            if (time_elapsed < 0.2) move.angular.z = -0.4;
-            else changeState(FORWARD);
-            break;
+    move.linear.x = 0.15;
+    double time_since_correction = (ros::Time::now() - correction_timer).toSec();
+    if (time_since_correction >= correction_interval) {
+        float angle_correction = computeCorrectionAngle();
+        move.angular.z = angle_correction;
+        prev_pose = current_pose;
+        prev_left_distance = regions["left"];
+        correction_timer = ros::Time::now();
+    } else {
+        move.angular.z = 0.0;
     }
-
-    //ROS_INFO("X:%f, Y:%f, theta:%f", current_pose.x, current_pose.y, current_pose.theta);
-
     movement_pub.publish(move);
 }
 
 int main(int argc, char** argv) {
     ros::init(argc, argv, "wall_follower");
-
     ros::NodeHandle n;
-
     ros::Subscriber sub_odom = n.subscribe("odom", 100, odomCallback);
     ros::Subscriber sub_scan = n.subscribe("scan", 100, scanCallback);
-
     movement_pub = n.advertise<geometry_msgs::Twist>("cmd_vel", 10);
-
     ros::Rate rate(20);
-
+    state_timer = ros::Time::now();
+    correction_timer = ros::Time::now();
     while (ros::ok()) {
         follow_wall();
-
-        time_elapsed = (ros::Time::now() - state_timer).toSec();
-
         ros::spinOnce();
         rate.sleep();
     }
-
     return 0;
 }
