@@ -1,0 +1,13 @@
+<launch>
+  <node pkg="gmapping" type="slam_gmapping" name="slam_gmapping" output="screen">
+    <!-- Configuración básica -->
+    <param name="base_frame" value="base_footprint" />       <!-- Frame del robot -->
+    <param name="odom_frame" value="odom" />           <!-- Frame de odometría -->
+    <param name="map_update_interval" value="1.0" />    <!-- Tiempo de actualización del mapa (seg) -->
+    <param name="maxUrange" value="6.0" />              <!-- Rango máximo del LIDAR -->
+    <param name="delta" value="0.01" />                <!-- Resolución del mapa (metros/pixel) -->
+    
+    <!-- Topic del láser -->
+    <remap from="scan" to="/scan" />                   <!-- Ajusta si tu topic es diferente -->
+  </node>
+</launch>

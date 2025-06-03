@@ -1,0 +1,5 @@
+<launch>
+	<!-- My Package launch file -->
+	<node pkg="move_map_pkg" type="wall_follow_exe" name="wall_follow" output="screen">
+	</node>
+</launch>
