@@ -10,7 +10,7 @@
 
 geometry_msgs::Pose2D current_pose;
 
-enum State { FORWARD, TURN_LEFT, TURN_RIGHT };
+enum State { FORWARD, TURN_LEFT, TURN_RIGHT, GO_BACK };
 
 State state = FORWARD;
 
@@ -26,6 +26,7 @@ std::string direccionGiro = "";
 
 float goForward10CM = 0.0;
 float turn90Degree = 0.0;
+float turn180Degree = 0.0;
 
 ros::Publisher movement_pub;
 
@@ -90,28 +91,27 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     regions["front"] = min(min(ranges, 30, 30), min(ranges, 329, 30));
     regions["left"] = min(ranges, 90, 70);
 
-    if (!noWallRight && (regions["right"] >= 0.35)) noWallRight = true;
-    if (!noWallLeft && (regions["left"] >= 0.35)) noWallLeft = true;
+    if (!noWallRight && (regions["right"] >= 0.4)) noWallRight = true;
+    if (!noWallLeft && (regions["left"] >= 0.4)) noWallLeft = true;
 
     ROS_INFO("noWallLeft:%d, noWallRight:%d", noWallLeft, noWallRight);
 }
 
 void follow_wall() {
     geometry_msgs::Twist move;
-
+	move.linear.x = 0;
+    move.angular.z = 0;  
+        
     switch (state) {
-    case FORWARD:
-        move.linear.x = 0;
-        move.angular.z = 0;    
+    case FORWARD:  
 
-
-        /* if (noWallRight) {
+        if (noWallRight) {
             state = TURN_RIGHT;
         }
 
         else if (noWallLeft) {
             state = TURN_LEFT;
-        } */
+        }
 
 
         if ((regions["right"] > wall_dist + tolerance) && direccionGiro != "derecha") {
@@ -170,15 +170,22 @@ void follow_wall() {
         break;
 
     case TURN_LEFT:
-        move.angular.z = 0;
-        move.linear.x = 0;
-        if (goForward10CM < 0.1) {
-            move.linear.x = 0.05;
-            goForward10CM += 0.05;
-        }
-        else if (turn90Degree < 1.5708) {
+      
+        if (turn90Degree < 1.5708) {
             move.angular.z = 0.5236;
             turn90Degree += 0.5236;
+        }
+        else if (goForward10CM < 0.1) {
+            if (regions["front"] > segurity_dist)
+				move.linear.x = 0.05;
+				goForward10CM += 0.05;
+			}
+			else {
+				goForward10CM = 0.0;
+				turn90Degree = 0.0;
+				state = GO_BACK;
+				noWallLeft = false;
+			}
         }
         else {
             goForward10CM = 0.0;
@@ -191,15 +198,22 @@ void follow_wall() {
         break;
 
     case TURN_RIGHT:
-        move.angular.z = 0;
-        move.linear.x = 0;
-        if (goForward10CM < 0.1) {
-            move.linear.x = 0.05;
-            goForward10CM += 0.05;
-        }
-        else if (turn90Degree < 1.5708) {
+
+        if (turn90Degree < 1.5708) {
             move.angular.z = -0.5236;
             turn90Degree += 0.5236;
+        }
+        else if (goForward10CM < 0.1) {
+			if (regions["front"] > segurity_dist)
+				move.linear.x = 0.05;
+				goForward10CM += 0.05;
+			}
+			else {
+				goForward10CM = 0.0;
+				turn90Degree = 0.0;
+				state = GO_BACK;
+				noWallRight = false;
+			}
         }
         else {
             goForward10CM = 0.0;
@@ -210,6 +224,19 @@ void follow_wall() {
         ROS_INFO("turn right");
         break;
     }
+    
+    case GO_BACK:
+    
+		if (turn180Degree < 3.1416) {
+			move.angular.z = -0.5236;
+            turn1800Degree += 0.5236;
+		}
+		else {
+			turn90Degree = 0.0;
+            state = FORWARD;
+		}
+		ROS_INFO("go back");
+		break;
 
     //move.angular.z = -0.2;
     //ROS_INFO("X:%f, Y:%f, theta:%f", current_pose.x, current_pose.y, current_pose.theta);
