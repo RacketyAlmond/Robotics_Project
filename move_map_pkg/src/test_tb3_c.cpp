@@ -18,6 +18,10 @@ float wall_dist = 0.5;
 float tolerance = 0.05;
 float segurity_dist = 0.4;
 float go_back_dist = 0.2;
+float turn_dist = 0.2;
+
+ros::Duration elapsed_turn_time;
+ros::Time last_update_time;
 
 bool closeToRight = false;
 bool closeToLeft = false;
@@ -99,6 +103,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     regions["leftFront"] = min(ranges, 90, 70);
     regions["right"] = min(ranges, 270, 15);
     regions["left"] = min(ranges, 90, 15);
+    regions["rightTurn"] = avg(ranges, 270, 15);
+    regions["leftTurn"] = avg(ranges, 90, 15);
 
 
 
@@ -110,85 +116,88 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
 
 void follow_wall() {
     geometry_msgs::Twist move;
-	move.linear.x = 0;
+    move.linear.x = 0;
     move.angular.z = 0;  
         
     switch (state) {
-    case FORWARD:  
+	    case FORWARD:  
 
-        if (noWallRight) {
-            state = TURN_RIGHT;
-            turn90Degree = true;
-        }
+		if (noWallRight) {
+		    state = TURN_RIGHT;
+		    turn90Degree = true;
+		    break;
+		}
 
-        else if (noWallLeft) {
-            state = TURN_LEFT;
-            turn90Degree = true;
-        } 
+		else if (noWallLeft && regions["front"] < segurity_dist) {
+		    state = TURN_LEFT;
+		    turn90Degree = true;
+		    break;
+		} 
 
 
-        if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
+		if ((regions["rightFront"] > wall_dist + tolerance) && !noWallRight && direccionGiro != "derecha") {
 
-            //move.linear.x = 0.03;
-            /*if ((regions["front"] < segurity_dist && regions["front"] != 0.0) && !(regions["leftFront"] < wall_dist + tolerance)) {
-                move.angular.z = 0.5236;
-            }
-            else {*/
-                move.angular.z = -0.5236;
-                if (regions["front"] > segurity_dist) {
-					direccionGiro = "derecha";
+		    //move.linear.x = 0.03;
+		    /*if ((regions["front"] < segurity_dist && regions["front"] != 0.0) && !(regions["leftFront"] < wall_dist + tolerance)) {
+		        move.angular.z = 0.5236;
+		    }
+		    else {*/
+		        move.angular.z = -0.3;
+		        if (regions["front"] > segurity_dist) {
+						direccionGiro = "derecha";
+					}
+		    //}
+
+		    //closeToRight = !closeToRight;
+
+		    ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+		}
+		else if ((regions["leftFront"] > wall_dist + tolerance) && !noWallLeft && direccionGiro != "izquierda") {
+
+		    //move.linear.x = 0.03;
+		    /*if ((regions["front"] < segurity_dist && regions["front"] != 0.0) && !(regions["rightFront"] < wall_dist + tolerance)) {
+		        move.angular.z = -0.5236; 
+		    }
+		    else {*/
+		        move.angular.z = 0.3;
+		        if (regions["front"] > segurity_dist) {
+						direccionGiro = "izquierda";
+					}
+		    //}
+
+		    //closeToLeft = !closeToLeft;
+
+		    ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+		}
+		else {
+				if (regions["front"] < segurity_dist) {
+					direccionGiro = "";
+					/*if (!noWallLeft && !noWallRight) {
+						state = GO_BACK;
+						turn180Degree = true;
+					}*/
 				}
-            //}
-
-            //closeToRight = !closeToRight;
-
-            ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
-        }
-        else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
-
-            //move.linear.x = 0.03;
-            /*if ((regions["front"] < segurity_dist && regions["front"] != 0.0) && !(regions["rightFront"] < wall_dist + tolerance)) {
-                move.angular.z = -0.5236; 
-            }
-            else {*/
-                move.angular.z = 0.5236;
-                if (regions["front"] > segurity_dist) {
-					direccionGiro = "izquierda";
+				else {
+					move.angular.z = 0.0;
+					move.linear.x = 0.15;
 				}
-            //}
-
-            //closeToLeft = !closeToLeft;
-
-            ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
-        }
-        else {
-			if (regions["front"] < segurity_dist) {
-				direccionGiro = "";
-				/*if (!noWallLeft && !noWallRight) {
-					state = GO_BACK;
-					turn180Degree = true;
-				}*/
-			}
-			else {
-				move.angular.z = 0.0;
-				move.linear.x = 0.1;
-			}
-            //direccionGiro = "forward";
-            ROS_INFO("forward else");
-        }
+		    //direccionGiro = "forward";
+		    ROS_INFO("forward else");
+		}
 
 
-        ROS_INFO("front:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s", regions["front"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str());
+		ROS_INFO("front:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, leftTurn:%f, rightTurn:%f", regions["front"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), regions["leftTurn"], regions["rightTurn"]);
 
-        break;
+		break;
 
-    case TURN_LEFT:
-      
-        static ros::Time turn_start_time;
+	    case TURN_LEFT:
+	      	{
+		static ros::Time turn_start_time;
 		static enum { WAIT_BEFORE_TURN, DO_TURN, DETECT_WALLS, GO_FORWARD_AFTER_TURN } turn_left_substate = WAIT_BEFORE_TURN;
-
+		
+		
 		switch (turn_left_substate) {
 
 		case WAIT_BEFORE_TURN:
@@ -197,14 +206,42 @@ void follow_wall() {
 			turn_start_time = ros::Time::now();
 			turn_left_substate = DO_TURN;
 			ROS_INFO("Waiting 1 second before turn...");
+			elapsed_turn_time = ros::Duration(0.0);
+			last_update_time = ros::Time::now();
 			break;
 
 		case DO_TURN:{
-			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				move.linear.x = 0.1;
-				move.angular.z = 0.0;
+			ros::Time now = ros::Time::now();
+			ros::Duration dt = now - last_update_time;
+			last_update_time = now;
+			//if ((ros::Time::now() - turn_start_time).toSec() < 1.0) {
+			/*if ((elapsed_turn_time.toSec() < 2.0)) {
+				if (regions["front"] > turn_dist) {
+					move.linear.x = 0.1;
+					direccionGiro = "";
+					elapsed_turn_time += dt; 
+				}
+				else {
+					move.linear.x = 0.0;
+					if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
+
+						move.angular.z = -0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "derecha";
+								}
+
+					}
+					else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+			
+						move.angular.z = 0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "izquierda";
+								}
+					}
+				}	
+				ROS_INFO("elapseTime:%f", elapsed_turn_time.toSec());
 				break;
-			}
+			}*/
 
 			if (turn90Degree) {
 				initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
@@ -215,7 +252,8 @@ void follow_wall() {
 			double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
 
 			if (fabs(delta_yaw) < M_PI / 2) {
-				move.angular.z = 0.5236;
+				move.angular.z = 0.4;
+				move.linear.x = 0.0;
 			}
 			else {
 				move.angular.z = 0.0;
@@ -234,21 +272,23 @@ void follow_wall() {
 				move.angular.z = 0.0;0
 			}*/
 			{
-			if (regions["left"] >= wall_dist + 0.25 || regions["right"] >= wall_dist + 0.25) {
-				move.linear.x = 0.1;
+			if ((regions["left"] >= wall_dist + 0.25 || regions["right"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
+				move.linear.x = 0.15;
 				move.angular.z = 0.0;
 			} else {
 				turn_left_substate = GO_FORWARD_AFTER_TURN;
 				move.angular.z = 0.0;
 				move.linear.x = 0.0;
 			}
+			
 			break;
 		}
 			
 		case GO_FORWARD_AFTER_TURN:
 			{
 			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				move.linear.x = 0.1;
+				if (regions["front"] > turn_dist) move.linear.x = 0.15;
+				else move.linear.x = 0.0;
 				move.angular.z = 0.0;
 				break;
 			}
@@ -263,15 +303,17 @@ void follow_wall() {
 			break;
 		}
 		}
-
-		ROS_INFO("turn left, state: %d", turn_right_substate);
+		ROS_INFO("left:%f, right:%f", regions["left"], regions["right"]);  
+		ROS_INFO("turn left, state: %d", turn_left_substate);
 		break;
+		}
 		
 	case TURN_RIGHT: {
 
 		static ros::Time turn_start_time;
 		static enum { WAIT_BEFORE_TURN, DO_TURN, DETECT_WALLS, GO_FORWARD_AFTER_TURN } turn_right_substate = WAIT_BEFORE_TURN;
-
+		
+		
 		switch (turn_right_substate) {
 
 		case WAIT_BEFORE_TURN:
@@ -280,12 +322,40 @@ void follow_wall() {
 			turn_start_time = ros::Time::now();
 			turn_right_substate = DO_TURN;
 			ROS_INFO("Waiting 1 second before turn...");
+			elapsed_turn_time = ros::Duration(0.0);
+			last_update_time = ros::Time::now();
 			break;
 
 		case DO_TURN:{
-			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				move.linear.x = 0.1;
-				move.angular.z = 0.0;
+			ros::Time now = ros::Time::now();
+			ros::Duration dt = now - last_update_time;
+			last_update_time = now;
+			//if ((ros::Time::now() - turn_start_time).toSec() < 1.0) {
+			if ((elapsed_turn_time.toSec() < 2.0)) {
+				if (regions["front"] > turn_dist) {
+					move.linear.x = 0.1;
+					direccionGiro = "";
+					elapsed_turn_time += dt; 
+				}
+				else {
+					move.linear.x = 0.0;
+					if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
+
+						move.angular.z = -0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "derecha";
+								}
+
+					}
+					else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+			
+						move.angular.z = 0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "izquierda";
+								}
+					}
+				}	
+				ROS_INFO("elapseTime:%f", elapsed_turn_time.toSec());			
 				break;
 			}
 
@@ -298,7 +368,7 @@ void follow_wall() {
 			double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
 
 			if (fabs(delta_yaw) < M_PI / 2) {
-				move.angular.z = -0.5236;
+				move.angular.z = -0.4;
 				move.linear.x = 0.0;
 			} else {
 				move.angular.z = 0.0;
@@ -316,19 +386,21 @@ void follow_wall() {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
 			}*/ 
-			if (regions["right"] >= wall_dist + 0.25 || regions["left"] >= wall_dist + 0.25) {
-				move.linear.x = 0.1;
+			if ((regions["right"] >= wall_dist + 0.25 || regions["left"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
+				move.linear.x = 0.15;
 				move.angular.z = 0.0;
 			}else {
 				turn_right_substate = GO_FORWARD_AFTER_TURN;
 			}
+			ROS_INFO("left:%f, right:%f", regions["left"], regions["right"]);  
 			break;
 		}
 			
 		case GO_FORWARD_AFTER_TURN:
 		{
 			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				move.linear.x = 0.1;
+				if (regions["front"] > turn_dist) move.linear.x = 0.15;
+				else move.linear.x = 0.0;
 				move.angular.z = 0.0;
 				break;
 			}
@@ -348,10 +420,10 @@ void follow_wall() {
 
 		ROS_INFO("turn right, state: %d", turn_right_substate);
 		break;
-}
+	}
 
     
-    case GO_BACK:
+    	case GO_BACK:
     
 		if (turn180Degree) {
 			initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
