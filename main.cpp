@@ -5,18 +5,71 @@
 #include <geometry_msgs/Pose2D.h>
 #include <nav_msgs/Odometry.h>
 #include <math.h>
+#include <algorithm>
+#include <string>
+#include <angles/angles.h>
 
 geometry_msgs::Pose2D current_pose;
-const double linear_velocity = 0.1;  // m/s (linear velocity)
-const double angular_velocity = 0.2; // rad/s (angular velocity)
-const double target_distance_1m = 1.0;
-const double target_distance_05m = 0.5;
-const double target_distance_025m = 0.25;
-double distance_travelled = 0.0;
+
+enum State { FORWARD, TURN_LEFT, TURN_RIGHT, GO_BACK };
+State state = FORWARD;
+
+float wall_dist = 0.5;
+float tolerance = 0.05;
+float segurity_dist = 0.4;
+float go_back_dist = 0.2;
+
+bool closeToRight = false;
+bool closeToLeft = false;
+bool noWallRight = false;
+bool noWallLeft = false;
+
+std::string direccionGiro = "";
+
+float goForward10CM = 0.0;
+bool turn90Degree = false;
+bool turn180Degree = false;
 double initial_yaw = 0.0;
 
-void odomCallback(const nav_msgs::OdometryConstPtr& msg)
-{
+nav_msgs::Odometry current_odom;
+ros::Publisher movement_pub;
+ros::Time turn_start_time;
+enum TurnRightSubState { WAIT_BEFORE_TURN, DO_TURN, GO_FORWARD_AFTER_TURN };
+TurnRightSubState turn_right_substate = WAIT_BEFORE_TURN;
+std::map<std::string, float> regions;
+
+float min(float a, float b) { return (a < b) ? a : b; }
+
+float min(const std::vector<float>& range, int mid, int offset) {
+    float min_value = std::numeric_limits<float>::infinity();
+
+    for (int i = mid - offset; i <= mid + offset; ++i) {
+        if (std::isfinite(range[i]) and range[i] != 0) {
+            min_value = min(min_value, range[i]);
+        }
+    }
+
+    return min_value;
+}
+
+float avg(float a, float b) { return (a + b) / 2; }
+
+float avg(const std::vector<float>& range, int mid, int offset) {
+    float sum = 0.0;
+    int count = 0;
+
+    for (int i = mid - offset; i <= mid + offset; ++i) {
+        if (std::isfinite(range[i]) and range[i] != 0) {
+            sum += range[i];
+            ++count;
+        }
+    }
+
+    return sum / count;
+}
+
+void odomCallback(const nav_msgs::OdometryConstPtr& msg) {
+    current_odom = *msg;
     current_pose.x = msg->pose.pose.position.x;
     current_pose.y = msg->pose.pose.position.y;
 
@@ -26,93 +79,275 @@ void odomCallback(const nav_msgs::OdometryConstPtr& msg)
             msg->pose.pose.orientation.z,
             msg->pose.pose.orientation.w
     );
-
     tf::Matrix3x3 m(q);
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
     current_pose.theta = yaw;
 }
 
-void moveForward(double target_distance, ros::Publisher& movement_pub)
-{
+void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
+    const std::vector<float>& ranges = msg->ranges;
+
+    //regions["right"] = avg(ranges, 248, 292); //msg->ranges[270];
+    //regions["fright"] = avg(ranges, 293, 337); //msg->ranges[315];
+    //regions["front"] = avg(avg(ranges, 338, 359), avg(ranges, 0, 22)); //msg->ranges[0];
+    //regions["fleft"] = avg(ranges, 23, 67); //msg->ranges[45];
+    //regions["left"] = avg(ranges, 68, 112); //msg->ranges[90];
+
+    regions["rightFront"] = min(ranges, 270, 70);
+    regions["front"] = min(min(ranges, 30, 30), min(ranges, 329, 30));
+    regions["leftFront"] = min(ranges, 90, 70);
+    regions["right"] = min(ranges, 270, 15);
+    regions["left"] = min(ranges, 90, 15);
+
+
+
+    if (!noWallRight && (regions["right"] >= 0.95) && state == FORWARD) noWallRight = true;
+    if (!noWallLeft && (regions["left"] >= 0.95) && state == FORWARD) noWallLeft = true;
+
+    ROS_INFO("noWallLeft:%d, noWallRight:%d", noWallLeft, noWallRight);
+}
+
+void follow_wall() {
     geometry_msgs::Twist move;
-    ros::Rate rate(10);
-    distance_travelled = 0.0;
+    move.linear.x = 0;
+    move.angular.z = 0;
 
-    ros::Time start_time = ros::Time::now();
-    while (distance_travelled < target_distance) {
-        move.linear.x = linear_velocity;
-        movement_pub.publish(move);
+    switch (state) {
+        case FORWARD:
+            if (regions["front"] < go_back_dist &&
+                regions["leftFront"] < wall_dist + tolerance &&
+                regions["rightFront"] < wall_dist + tolerance) {
 
-        // Compute the distance travelled
-        distance_travelled = linear_velocity * (ros::Time::now() - start_time).toSec();
-        rate.sleep();
+                direccionGiro = "";
+                state = GO_BACK;
+                turn180Degree = true;
+                ROS_INFO("Dead end detected! Initiating GO_BACK");
+                return;
+            }
+
+            // Keep centered in corridor
+            float error = regions["left"] - regions["right"];
+            float Kp = 1.0;
+            move.linear.x = 0.1;
+            move.angular.z = std::clamp(Kp * error, -0.5f, 0.5f);
+
+            ROS_INFO("Centered driving: error=%f, angular=%f", error, move.angular.z);
+            break;
+
+        case TURN_LEFT:
+
+            static ros::Time turn_start_time;
+            static enum { WAIT_BEFORE_TURN, DO_TURN, DETECT_WALLS, GO_FORWARD_AFTER_TURN } turn_left_substate = WAIT_BEFORE_TURN;
+
+            switch (turn_left_substate) {
+
+                case WAIT_BEFORE_TURN:
+                    move.linear.x = 0.0;
+                    move.angular.z = 0.0;
+                    turn_start_time = ros::Time::now();
+                    turn_left_substate = DO_TURN;
+                    ROS_INFO("Waiting 1 second before turn...");
+                    break;
+
+                case DO_TURN:{
+                    if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                        break;
+                    }
+
+                    if (turn90Degree) {
+                        initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+                        turn90Degree = false;
+                    }
+
+                    double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+                    double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
+
+                    if (fabs(delta_yaw) < M_PI / 2) {
+                        move.angular.z = 0.5236;
+                    }
+                    else {
+                        move.angular.z = 0.0;
+                        goForward10CM = 0.0;
+                        turn_left_substate = DETECT_WALLS;
+                        turn_start_time = ros::Time::now();  // reuse timer for next phase
+                        ROS_INFO("Finished turning. Start going forward...");
+                    }
+                    break;
+
+                }
+
+                case DETECT_WALLS:
+                    /*if ((ros::Time::now() - turn_start_time).toSec() < 3.0) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;0
+                    }*/
+                {
+                    if (regions["left"] >= wall_dist + 0.25 || regions["right"] >= wall_dist + 0.25) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                    } else {
+                        turn_left_substate = GO_FORWARD_AFTER_TURN;
+                        move.angular.z = 0.0;
+                        move.linear.x = 0.0;
+                    }
+                    break;
+                }
+
+                case GO_FORWARD_AFTER_TURN:
+                {
+                    if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                        break;
+                    }
+                    else {
+                        goForward10CM = 0.0;
+                        turn90Degree = 0.0;
+                        state = FORWARD;
+                        noWallRight = false;
+                        turn_left_substate = WAIT_BEFORE_TURN;  // reset for next turn
+                        ROS_INFO("Done with forward phase after turning.");
+                    }
+                    break;
+                }
+            }
+
+            ROS_INFO("turn left, state: %d", turn_right_substate);
+            break;
+
+        case TURN_RIGHT: {
+
+            static ros::Time turn_start_time;
+            static enum { WAIT_BEFORE_TURN, DO_TURN, DETECT_WALLS, GO_FORWARD_AFTER_TURN } turn_right_substate = WAIT_BEFORE_TURN;
+
+            switch (turn_right_substate) {
+
+                case WAIT_BEFORE_TURN:
+                    move.linear.x = 0.0;
+                    move.angular.z = 0.0;
+                    turn_start_time = ros::Time::now();
+                    turn_right_substate = DO_TURN;
+                    ROS_INFO("Waiting 1 second before turn...");
+                    break;
+
+                case DO_TURN:{
+                    if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                        break;
+                    }
+
+                    if (turn90Degree) {
+                        initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+                        turn90Degree = false;
+                    }
+
+                    double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+                    double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
+
+                    if (fabs(delta_yaw) < M_PI / 2) {
+                        move.angular.z = -0.5236;
+                        move.linear.x = 0.0;
+                    } else {
+                        move.angular.z = 0.0;
+                        goForward10CM = 0.0;
+                        turn_right_substate = DETECT_WALLS;
+                        turn_start_time = ros::Time::now();  // reuse timer for next phase
+                        ROS_INFO("Finished turning. Start going forward...");
+                    }
+                    break;
+
+                }
+
+                case DETECT_WALLS:
+                {/*if ((ros::Time::now() - turn_start_time).toSec() < 3.0) {
+				move.linear.x = 0.1;
+				move.angular.z = 0.0;
+			}*/
+                    if (regions["right"] >= wall_dist + 0.25 || regions["left"] >= wall_dist + 0.25) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                    }else {
+                        turn_right_substate = GO_FORWARD_AFTER_TURN;
+                    }
+                    break;
+                }
+
+                case GO_FORWARD_AFTER_TURN:
+                {
+                    if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
+                        move.linear.x = 0.1;
+                        move.angular.z = 0.0;
+                        break;
+                    }
+                    else {
+                        goForward10CM = 0.0;
+                        turn90Degree = 0.0;
+                        state = FORWARD;
+                        noWallRight = false;
+                        turn_right_substate = WAIT_BEFORE_TURN;  // reset for next turn
+                        ROS_INFO("Done with forward phase after turning.");
+                    }
+                    break;
+                }
+            }
+
+
+
+            ROS_INFO("turn right, state: %d", turn_right_substate);
+            break;
+        }
+
+
+        case GO_BACK:
+
+            if (turn180Degree) {
+                initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+                turn180Degree = false;
+            }
+
+            double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+            double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
+
+            if (fabs(delta_yaw) < M_PI) {
+                move.angular.z = -0.5236;
+            } else {
+                move.angular.z = 0.0;
+                state = FORWARD;
+                //ROS_INFO("Finished turning. Start going forward...");
+            }
+            ROS_INFO("GO_BACK");
+            break;
+
     }
 
-    // Stop the robot after reaching the target distance
-    move.linear.x = 0.0;
+    //move.angular.z = -0.2;
+    //ROS_INFO("X:%f, Y:%f, theta:%f", current_pose.x, current_pose.y, current_pose.theta);
+
     movement_pub.publish(move);
 }
 
-void turn(double target_angle, ros::Publisher& movement_pub)
-{
-    geometry_msgs::Twist move;
-    ros::Rate rate(10);
+int main(int argc, char** argv) {
+    ros::init(argc, argv, "wall_follower");
 
-    double initial_yaw = current_pose.theta;
-    double target_yaw = initial_yaw + target_angle;
-
-    if (target_yaw > M_PI) target_yaw -= 2 * M_PI;  // Normalize the target angle to [-pi, pi]
-    if (target_yaw < -M_PI) target_yaw += 2 * M_PI;
-
-    ros::Time start_time = ros::Time::now();
-    while (fabs(current_pose.theta - target_yaw) > 0.05) { // 0.05 rad tolerance
-        move.angular.z = (target_angle > 0) ? angular_velocity : -angular_velocity;
-        movement_pub.publish(move);
-        rate.sleep();
-    }
-
-    // Stop the robot after completing the turn
-    move.angular.z = 0.0;
-    movement_pub.publish(move);
-}
-
-int main(int argc, char **argv)
-{
-    ros::init(argc, argv, "HolaBot");
     ros::NodeHandle n;
-    ros::Subscriber sub_odometry = n.subscribe("odom", 100, odomCallback);
-    ros::Publisher movement_pub = n.advertise<geometry_msgs::Twist>("cmd_vel", 1000);
-    ros::Rate rate(10);
 
-    // Wait for initial pose data
-    ros::spinOnce();
-    initial_yaw = current_pose.theta;
+    ros::Subscriber sub_odom = n.subscribe("odom", 100, odomCallback);
+    ros::Subscriber sub_scan = n.subscribe("scan", 100, scanCallback);
 
-    // Move 1 meter forward
-    moveForward(target_distance_1m, movement_pub);
-    ros::spinOnce(); // Update the robot's pose after movement
+    movement_pub = n.advertise<geometry_msgs::Twist>("cmd_vel", 10);
 
-    // Turn right 90 degrees (positive angle)
-    turn(M_PI / 2, movement_pub);
+    ros::Rate rate(20);
 
-    // Move 0.5 meters forward
-    moveForward(target_distance_05m, movement_pub);
-    ros::spinOnce(); // Update the robot's pose after movement
+    while (ros::ok()) {
+        follow_wall();
 
-    // Turn left 90 degrees (negative angle)
-    turn(-M_PI / 2, movement_pub);
+        ros::spinOnce();
+        rate.sleep();
+    }
 
-    // Move 0.25 meters forward
-    moveForward(target_distance_025m, movement_pub);
-    ros::spinOnce(); // Update the robot's pose after movement
-
-    // Turn left 90 degrees again (negative angle)
-    turn(-M_PI / 2, movement_pub);
-
-    // Move 0.25 meters forward
-    moveForward(target_distance_025m, movement_pub);
-
-    ros::spinOnce();
     return 0;
 }
