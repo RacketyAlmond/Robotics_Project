@@ -278,10 +278,24 @@ void follow_wall() {
 			if ((regions["leftTurn"] >= wall_dist + 0.25 || regions["rightTurn"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
 				move.linear.x = 0.15;
 				move.angular.z = 0.0;
+			
+				
 			} else {
-				turn_left_substate = GO_FORWARD_AFTER_TURN;
-				move.angular.z = 0.0;
-				move.linear.x = 0.0;
+				if (regions["front"] <= segurity_dist) {
+					goForward10CM = 0.0;
+					turn90Degree = false;
+					state = FORWARD;
+					noWallLeft = false;
+					turn_left_substate = WAIT_BEFORE_TURN;
+				}
+				
+				else {
+					turn_left_substate = GO_FORWARD_AFTER_TURN;
+					move.angular.z = 0.0;
+					move.linear.x = 0.0;
+					elapsed_turn_time = ros::Duration(0.0);
+					last_update_time = ros::Time::now();
+				}
 			}
 			
 			break;
@@ -289,17 +303,42 @@ void follow_wall() {
 			
 		case GO_FORWARD_AFTER_TURN:
 			{
-			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				if (regions["front"] > turn_dist) move.linear.x = 0.15;
-				else move.linear.x = 0.0;
-				move.angular.z = 0.0;
+			ros::Time now = ros::Time::now();
+			ros::Duration dt = now - last_update_time;
+			last_update_time = now;
+			//if ((ros::Time::now() - turn_start_time).toSec() < 1.0) {
+			if ((elapsed_turn_time.toSec() < 1.5)) {
+				if (regions["front"] > turn_dist) {
+					move.linear.x = 0.1;
+					direccionGiro = "";
+					elapsed_turn_time += dt; 
+				}
+				else {
+					move.linear.x = 0.0;
+					if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
+
+						move.angular.z = -0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "derecha";
+								}
+
+					}
+					else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+			
+						move.angular.z = 0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "izquierda";
+								}
+					}
+				}	
+				ROS_INFO("elapseTime:%f", elapsed_turn_time.toSec());			
 				break;
 			}
 			else {
 				goForward10CM = 0.0;
-				turn90Degree = 0.0;
+				turn90Degree = false;
 				state = FORWARD;
-				noWallRight = false;
+				noWallLeft = false;
 				turn_left_substate = WAIT_BEFORE_TURN;  // reset for next turn
 				ROS_INFO("Done with forward phase after turning.");
 			}
@@ -393,7 +432,21 @@ void follow_wall() {
 				move.linear.x = 0.15;
 				move.angular.z = 0.0;
 			}else {
-				turn_right_substate = GO_FORWARD_AFTER_TURN;
+				if (regions["front"] <= segurity_dist) {
+					goForward10CM = 0.0;
+					turn90Degree = false;
+					state = FORWARD;
+					noWallRight = false;
+					turn_right_substate = WAIT_BEFORE_TURN;
+				}
+				
+				else {
+					turn_right_substate = GO_FORWARD_AFTER_TURN;
+					move.angular.z = 0.0;
+					move.linear.x = 0.0;
+					elapsed_turn_time = ros::Duration(0.0);
+					last_update_time = ros::Time::now();
+				}
 			}
 			ROS_INFO("left:%f, right:%f", regions["left"], regions["right"]);  
 			break;
@@ -401,15 +454,40 @@ void follow_wall() {
 			
 		case GO_FORWARD_AFTER_TURN:
 		{
-			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
-				if (regions["front"] > turn_dist) move.linear.x = 0.15;
-				else move.linear.x = 0.0;
-				move.angular.z = 0.0;
+			ros::Time now = ros::Time::now();
+			ros::Duration dt = now - last_update_time;
+			last_update_time = now;
+			//if ((ros::Time::now() - turn_start_time).toSec() < 1.0) {
+			if ((elapsed_turn_time.toSec() < 1.5)) {
+				if (regions["front"] > turn_dist) {
+					move.linear.x = 0.1;
+					direccionGiro = "";
+					elapsed_turn_time += dt; 
+				}
+				else {
+					move.linear.x = 0.0;
+					if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
+
+						move.angular.z = -0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "derecha";
+								}
+
+					}
+					else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+			
+						move.angular.z = 0.3;
+						if (regions["front"] > segurity_dist) {
+									direccionGiro = "izquierda";
+								}
+					}
+				}	
+				ROS_INFO("elapseTime:%f", elapsed_turn_time.toSec());			
 				break;
 			}
 			else {
 				goForward10CM = 0.0;
-				turn90Degree = 0.0;
+				turn90Degree = false;
 				state = FORWARD;
 				noWallRight = false;
 				turn_right_substate = WAIT_BEFORE_TURN;  // reset for next turn
