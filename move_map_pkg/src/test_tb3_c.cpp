@@ -233,6 +233,7 @@ void follow_wall() {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;0
 			}*/
+			{
 			if (regions["left"] >= wall_dist + 0.25 || regions["right"] >= wall_dist + 0.25) {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
@@ -242,8 +243,10 @@ void follow_wall() {
 				move.linear.x = 0.0;
 			}
 			break;
+		}
 			
 		case GO_FORWARD_AFTER_TURN:
+			{
 			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
@@ -258,6 +261,7 @@ void follow_wall() {
 				ROS_INFO("Done with forward phase after turning.");
 			}
 			break;
+		}
 		}
 
 		ROS_INFO("turn left, state: %d", turn_right_substate);
@@ -295,7 +299,6 @@ void follow_wall() {
 
 			if (fabs(delta_yaw) < M_PI / 2) {
 				move.angular.z = -0.5236;
-				move.angular.z = 0.0;
 				move.linear.x = 0.0;
 			} else {
 				move.angular.z = 0.0;
@@ -309,10 +312,10 @@ void follow_wall() {
 		}
 
 		case DETECT_WALLS:
-			/*if ((ros::Time::now() - turn_start_time).toSec() < 3.0) {
+			{/*if ((ros::Time::now() - turn_start_time).toSec() < 3.0) {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
-			} */
+			}*/ 
 			if (regions["right"] >= wall_dist + 0.25 || regions["left"] >= wall_dist + 0.25) {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
@@ -320,8 +323,10 @@ void follow_wall() {
 				turn_right_substate = GO_FORWARD_AFTER_TURN;
 			}
 			break;
+		}
 			
 		case GO_FORWARD_AFTER_TURN:
+		{
 			if ((ros::Time::now() - turn_start_time).toSec() < 2.0) {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
@@ -337,10 +342,11 @@ void follow_wall() {
 			}
 			break;
 		}
+		}
 		
 		
 
-		ROS_INFO("turn right, state: %d", turn_right_substate");
+		ROS_INFO("turn right, state: %d", turn_right_substate);
 		break;
 }
 
