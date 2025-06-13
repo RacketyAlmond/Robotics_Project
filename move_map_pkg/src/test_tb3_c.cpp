@@ -105,6 +105,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     regions["left"] = min(ranges, 90, 15);
     regions["rightTurn"] = avg(ranges, 270, 15);
     regions["leftTurn"] = avg(ranges, 90, 15);
+    regions["frontTurn"] = avg(avg(ranges, 30, 30), avg(ranges, 329, 30));
 
 
 
@@ -125,12 +126,14 @@ void follow_wall() {
 		if (noWallRight) {
 		    state = TURN_RIGHT;
 		    turn90Degree = true;
+		    direccionGiro = "";
 		    break;
 		}
 
-		else if (noWallLeft && regions["front"] < segurity_dist) {
+		else if (noWallLeft && regions["frontTurn"] < segurity_dist) {
 		    state = TURN_LEFT;
 		    turn90Degree = true;
+		    direccionGiro = "";
 		    break;
 		} 
 
@@ -272,7 +275,7 @@ void follow_wall() {
 				move.angular.z = 0.0;0
 			}*/
 			{
-			if ((regions["left"] >= wall_dist + 0.25 || regions["right"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
+			if ((regions["leftTurn"] >= wall_dist + 0.25 || regions["rightTurn"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
 				move.linear.x = 0.15;
 				move.angular.z = 0.0;
 			} else {
@@ -331,7 +334,7 @@ void follow_wall() {
 			ros::Duration dt = now - last_update_time;
 			last_update_time = now;
 			//if ((ros::Time::now() - turn_start_time).toSec() < 1.0) {
-			if ((elapsed_turn_time.toSec() < 2.0)) {
+			if ((elapsed_turn_time.toSec() < 1.5)) {
 				if (regions["front"] > turn_dist) {
 					move.linear.x = 0.1;
 					direccionGiro = "";
@@ -386,7 +389,7 @@ void follow_wall() {
 				move.linear.x = 0.1;
 				move.angular.z = 0.0;
 			}*/ 
-			if ((regions["right"] >= wall_dist + 0.25 || regions["left"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
+			if ((regions["rightTurn"] >= wall_dist + 0.25 || regions["leftTurn"] >= wall_dist + 0.25) && regions["front"] > segurity_dist) {
 				move.linear.x = 0.15;
 				move.angular.z = 0.0;
 			}else {
