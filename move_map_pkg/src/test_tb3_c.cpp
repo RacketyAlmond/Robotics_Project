@@ -19,6 +19,7 @@ float tolerance = 0.05;
 float segurity_dist = 0.4;
 float go_back_dist = 0.2;
 float turn_dist = 0.2;
+float degrees45Dist = 0.7;
 
 ros::Duration elapsed_turn_time;
 ros::Time last_update_time;
@@ -99,13 +100,15 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     //regions["left"] = avg(ranges, 68, 112); //msg->ranges[90];
 
     regions["rightFront"] = min(ranges, 270, 70);
-    regions["front"] = min(min(ranges, 30, 30), min(ranges, 329, 30));
+    regions["front"] = min(min(ranges, 20, 20), min(ranges, 339, 20));
     regions["leftFront"] = min(ranges, 90, 70);
     regions["right"] = min(ranges, 270, 5);
     regions["left"] = min(ranges, 90, 5);
     regions["rightTurn"] = avg(ranges, 270, 5);
     regions["leftTurn"] = avg(ranges, 90, 5);
-    regions["frontTurn"] = (avg(ranges, 10, 10), avg(ranges, 349, 10));
+    regions["frontTurn"] = avg(avg(ranges, 10, 10), avg(ranges, 349, 10));
+    regions["45DegreesLeft"] = avg(ranges, 22.5, 22.5);
+    regions["45DegreesRight"] = avg(ranges, 337.5, 22.5);
 
 
 
@@ -136,7 +139,8 @@ void follow_wall() {
 		    direccionGiro = "";
 		    break;
 		} 
-		else {
+		
+		else if  (regions["45DegreesLeft"] < degrees45Dist && regions["45DegreesRight"] < degrees45Dist) {
 			if (regions["front"] > 0.0 && regions["front"] < segurity_dist && regions["frontTurn"] < segurity_dist+0.25 && regions["left"] < 0.95 && regions["right"] < 0.95) {
 				state = GO_BACK;
 				turn180Degree = true;
@@ -557,7 +561,7 @@ void follow_wall() {
     //move.angular.z = -0.2;
     //ROS_INFO("X:%f, Y:%f, theta:%f", current_pose.x, current_pose.y, current_pose.theta);
     
-    ROS_INFO("front:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, leftTurn:%f, rightTurn:%f, frontTurn:%f", regions["front"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), regions["leftTurn"], regions["rightTurn"], regions["frontTurn"]);
+    ROS_INFO("front:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, leftTurn:%f, rightTurn:%f, frontTurn:%f, 45DegreesLeft:%f. 45DegreesRight:%f", regions["front"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), regions["leftTurn"], regions["rightTurn"], regions["frontTurn"], regions["45DegreesLeft"], regions["45DegreesRight"]);
 
     movement_pub.publish(move);
 }
