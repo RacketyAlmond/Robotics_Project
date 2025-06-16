@@ -10,7 +10,9 @@ catkin_make
 
 
 *catkin_ws -> src -> test_tb3_pkg -> launch*
+
 ^^^open in terminal
+
 touch gmapping.lounch
 
 Inside the file, put:
@@ -19,4 +21,5 @@ Inside the file, put:
 *
 
 roslaunch test_tb3_pkg test_tb3_launch.launch
+
 rosrun map_server map_saver
