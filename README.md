@@ -33,4 +33,24 @@ Inside the file, put:
 
 roslaunch test_tb3_pkg test_tb3_launch.launch
 
+
+In the Rviz:
+
+Add (left down)
+
+TF
+
+In the left taskbar, change Global Options -> Fixed frame to odom
+
+
+Add
+
+Map
+
+In the left taskbar, change Map -> Topic to /map
+
+
+
+
+
 rosrun map_server map_saver
