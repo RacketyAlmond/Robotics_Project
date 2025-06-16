@@ -1,8 +1,11 @@
 (After launching robot)
 
 rosrun rviz rviz
+
 rosrun tf static_transform_publisher 0 0 0 0 0 0 base_footprint base_scan 100
+
 cd catkin_ws/
+
 catkin_make
 
 
