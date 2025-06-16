@@ -1,0 +1,21 @@
+ros::NodeHandle nh;
+  ros::Publisher pub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+
+  geometry_msgs::Twist twist;
+  twist.angular.z = 0.5;  // rad/s, puedes ajustar esto
+
+  ros::Rate rate(10);  // 10 Hz
+
+  double tiempo_giro = M_PI / 2.0 / 0.5;  // 90 grados en rad / vel angular
+  double tiempo_transcurrido = 0.0;
+
+  ros::Time start = ros::Time::now();
+  while (ros::ok() && tiempo_transcurrido < tiempo_giro) {
+    pub.publish(twist);
+    rate.sleep();
+    tiempo_transcurrido = (ros::Time::now() - start).toSec();
+  }
+
+  // Detener el robot
+  twist.angular.z = 0.0;
+  pub.publish(twist);
