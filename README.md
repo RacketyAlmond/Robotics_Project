@@ -8,6 +8,9 @@ cd catkin_ws/
 
 catkin_make
 
+··················································································
+
+
 catkin_ws -> src -> test_tb3_pkg -> launch
 
 ^^^open in terminal
@@ -30,6 +33,11 @@ Inside the file, put:
   </node>
 </launch>
 
+
+····················································································
+
+
+cd catkin_ws
 
 roslaunch test_tb3_pkg test_tb3_launch.launch
 
