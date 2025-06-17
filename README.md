@@ -12,7 +12,7 @@ catkin_ws -> src -> test_tb3_pkg -> launch
 
 ^^^open in terminal
 
-touch gmapping.lounch
+touch gmapping.launch
 
 Inside the file, put:
 
@@ -53,4 +53,4 @@ In the left taskbar, change Map -> Topic to /map
 
 
 
-rosrun map_server map_saver
+rosrun map_server map_saver -f ~/map
