@@ -19,20 +19,21 @@ float back_wall_dist = 0.18;
 float tolerance = 0.00;
 float segurity_dist_acercar = 0.10;
 float segurity_dist = 0.15;
-float segurityLeftFront = 0.12;
-float go_back_dist = 0.20;
+float segurityLeftFront = 0.13;
+float go_back_dist = 0.25;
 float turn_dist = 0.1;
 float degrees45Dist = sqrt(2*(segurity_dist*segurity_dist));
 float velocity = 0.08;
-float velocity_turn = 0.03;
+float velocity_turn = 0.02;
 float velocidad_angular = 0.2;
 float correccion_angular = 0.4;
 float anchura_dist = 0.39;
+float anchura2Entrada_dist = 0.42;
 float turn_tolerance = 0.1;
 float tiempoPrimerAvance = 2.0;
 float tiempoSegundoAvance = 2.0;
-float errorGiro90 = 0.14;
-int numVecesEntrar = 1;
+float errorGiro90 = 0.02;
+float numVecesEntrar = 0.0;
 
 
 int num_angulos_left = 0;
@@ -42,11 +43,15 @@ int num_angulos_cumplidos = 72;
 //ros::Duration elapsed_turn_time;
 ros::Time last_update_time;
 ros::Time turn_finish_time;
-float segundosEsperarActivarGirar = 2;
+float segundosEsperarActivarGirar = 2.5;
+float segundosEsperarActivarReady = 5.0;
+
 //bool noWallRight = false;
 //bool noWallLeft = false;
 bool girar = true;
 bool waiting_after_turn = false;
+bool empiezaSegundaEntrada = false;
+bool ready = true;
 
 std::string direccionGiro = "";
 
@@ -143,6 +148,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     regions["rightA"] = avg(ranges, 270, 15);
     regions["leftA"] = avg(ranges, 90, 15);
     regions["backA"] = avg(ranges, 180, 15);
+    regions["frontA"] = avg(avg(ranges, 4, 4), avg(ranges, 355, 4));
     regions["rightFrontA"] = avg(ranges, 260, 5);
     regions["leftFrontA"] = avg(ranges, 80, 5);
     regions["rightBackA"] = avg(ranges, 280, 5);
@@ -184,6 +190,14 @@ void follow_wall() {
 				}
 			}
 			
+			if (empiezaSegundaEntrada) {
+				if ((now - turn_finish_time).toSec() >= segundosEsperarActivarReady) {
+					ready = true;
+					empiezaSegundaEntrada = false;  
+					ROS_INFO("Ya pasó 1 segundo tras empezarSegundaEntrada. ready = true;");
+				}
+			}
+			
 			/*if (turn180Degree && (((regions["rightA"] >= anchura_dist) && (regions["leftA"] >= anchura_dist)) || ((regions["rightA"] >= anchura_dist) && (regions["backA"] >= anchura_dist)) ||((regions["leftA"] >= anchura_dist) && (regions["backA"] >= anchura_dist)))) {
 				turn180Degree = false;
 				velocity = -velocity;
@@ -194,21 +208,23 @@ void follow_wall() {
 			}*/
 				
 			
-			if (girar) {
+			if (girar && ready) {
 				
 				
-				if (numVecesEntrar == 1 && regions["rightA"] >= anchura_dist && regions["leftA"] >= anchura_dist && regions["frontTurn"] >= anchura_dist) {
+				if (numVecesEntrar == 0.0 && regions["rightA"] >= anchura2Entrada_dist && regions["leftA"] >= anchura2Entrada_dist && regions["frontA"] >= anchura2Entrada_dist) {
 					state = TURN_BACK;
 					turn180Degree = true;
-					numVecesEntrar = 2;
+					numVecesEntrar = 1.0;
+					empiezaSegundaEntrada = true;
 					ROS_INFO("Comienza la segunda entrada----------------------------------------------------------------------");
 					break;
 				}
 				
-				else if (numVecesEntrar == 2) {
+				else if (numVecesEntrar == 1.0 && regions["rightA"] >= anchura2Entrada_dist && regions["leftA"] >= anchura2Entrada_dist && regions["frontA"] >= anchura2Entrada_dist) {
 					move.linear.x = 0;
-    					move.angular.z = 0;
+    				move.angular.z = 0;
 					state = END_MAPEO;
+					
 					ROS_INFO("Fin de mapeo");
 					break;
 				}
@@ -227,7 +243,7 @@ void follow_wall() {
 						break;
 					}
 					
-					else if (regions["leftA"] >= anchura_dist) {
+					else if (regions["leftA"] >= anchura_dist && regions["frontTurn"] < anchura_dist) {
 					//else if (regions["leftA"] >= anchura_dist && regions["leftFrontA"] >= anchura_dist && regions["leftBackA"] >= anchura_dist) {
 					//else if (regions["leftA"] >= anchura_dist && num_angulos_right >= num_angulos_cumplidos) {
 						state = TURN_LEFT;
@@ -405,8 +421,8 @@ void follow_wall() {
 				double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
 
 				if (fabs(delta_yaw) < M_PI - errorGiro90) {
-					move.angular.z = -velocidad_angular;
-					move.linear.x = velocity_turn;
+					move.angular.z = velocidad_angular;
+					move.linear.x = 0.0;
 				}
 				else {
 					move.angular.z = 0.0;
@@ -414,7 +430,13 @@ void follow_wall() {
 					direccionGiro = "";
 					turn180Degree = false;
 					state = FORWARD;
+					if (empiezaSegundaEntrada) {
+						ready = false;
+						turn_finish_time = ros::Time::now();
+					}
 				}
+				ROS_INFO("TURN_BACK");
+				break;
 			 }
 			 
 			 case END_MAPEO:
@@ -425,7 +447,7 @@ void follow_wall() {
 			}
 		}
 	
-	ROS_INFO("front:%f, frontTurn:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, 45DegDist: %f, 45DegreesLeft:%f. 45DegreesRight:%f, leftA:%f, rightA:%f, backA:%f, frontLeft:%f, frontRight:%f", regions["front"], regions["frontTurn"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), degrees45Dist, regions["45DegreesLeft"], regions["45DegreesRight"], regions["leftA"], regions["rightA"], regions["backA"], regions["frontLeft"], regions["frontRight"]);
+	ROS_INFO("front:%f, frontTurn:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, 45DegDist: %f, 45DegreesLeft:%f. 45DegreesRight:%f, leftA:%f, rightA:%f, backA:%f, frontA:%f, frontLeft:%f, frontRight:%f, numVecesEntrar:%f", regions["front"], regions["frontTurn"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), degrees45Dist, regions["45DegreesLeft"], regions["45DegreesRight"], regions["leftA"], regions["rightA"], regions["backA"], regions["frontLeft"], regions["frontRight"], numVecesEntrar);
 
 	
     movement_pub.publish(move);
