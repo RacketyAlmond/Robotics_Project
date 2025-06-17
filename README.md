@@ -62,3 +62,10 @@ In the left taskbar, change Map -> Topic to /map
 
 
 rosrun map_server map_saver -f ~/map
+
+
+Para ejecutar code.cpp (mapas con computando salida)
+
+
+roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=$HOME/catkin_ws/mapa.yaml
+
