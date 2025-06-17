@@ -16,31 +16,38 @@ State state = FORWARD;
 
 float wall_dist = 0.2;
 float back_wall_dist = 0.18;
-float tolerance = 0.02;
+float tolerance = 0.00;
 float segurity_dist_acercar = 0.10;
-float segurity_dist = 0.27;
+float segurity_dist = 0.15;
+float segurityLeftFront = 0.12;
 float go_back_dist = 0.20;
 float turn_dist = 0.1;
 float degrees45Dist = sqrt(2*(segurity_dist*segurity_dist));
-float velocity = 0.12;
-float velocidad_angular = 0.4;
+float velocity = 0.08;
+float velocity_turn = 0.03;
+float velocidad_angular = 0.2;
 float correccion_angular = 0.4;
 float anchura_dist = 0.39;
 float turn_tolerance = 0.1;
 float tiempoPrimerAvance = 2.0;
 float tiempoSegundoAvance = 2.0;
 float errorGiro90 = 0.14;
+int num_angulos_left = 0;
+int num_angulos_right = 0;
+int num_angulos_cumplidos = 72;
 
-ros::Duration elapsed_turn_time;
+//ros::Duration elapsed_turn_time;
 ros::Time last_update_time;
-
+ros::Time turn_finish_time;
+float segundosEsperarActivarGirar = 2;
 //bool noWallRight = false;
 //bool noWallLeft = false;
 bool girar = true;
+bool waiting_after_turn = false;
 
 std::string direccionGiro = "";
 
-float goForward10CM = 0.0;
+//float goForward10CM = 0.0;
 bool turn90Degree = false;
 bool turn180Degree = false;
 double initial_yaw = 0.0;
@@ -67,6 +74,26 @@ float min(const std::vector<float>& range, int mid, int offset) {
 }
 
 float avg(float a, float b) { return (a + b) / 2; }
+
+float avg(const std::vector<float>& range, int mid, int offset, bool control) {
+    float sum = 0.0;
+    int count = 0;
+
+    for (int i = mid - offset; i <= mid + offset; ++i) {
+        if (std::isfinite(range[i]) and range[i] != 0) {
+            if (range[i] >= anchura_dist) {
+				if (control) ++num_angulos_left;
+				else ++num_angulos_right;
+				ROS_INFO("A DENTRO");
+			}
+            sum += range[i];
+            ++count;
+            ROS_INFO("A fuera, %f", range[i]);
+        }
+    }
+
+    return sum / count;
+}
 
 float avg(const std::vector<float>& range, int mid, int offset) {
     float sum = 0.0;
@@ -101,11 +128,22 @@ void odomCallback(const nav_msgs::OdometryConstPtr& msg) {
 
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     const std::vector<float>& ranges = msg->ranges;
-
-    regions["rightFront"] = min(ranges, 270, 70);
+	
+	
+	num_angulos_left = num_angulos_right = 0;
+    regions["rightFront"] = min(ranges, 270, 20);
+    regions["leftFront"] = min(ranges, 90, 20);
     regions["front"] = min(min(ranges, 20, 20), min(ranges, 339, 20));
+    regions["frontLeft"] = avg(ranges, 45, 5);
+	regions["frontRight"] = avg(ranges, 315, 5);
     regions["back"] = min(ranges, 180, 40);
-    regions["leftFront"] = min(ranges, 90, 70);
+    regions["rightA"] = avg(ranges, 270, 15);
+    regions["leftA"] = avg(ranges, 90, 15);
+    regions["backA"] = avg(ranges, 180, 15);
+    regions["rightFrontA"] = avg(ranges, 260, 5);
+    regions["leftFrontA"] = avg(ranges, 80, 5);
+    regions["rightBackA"] = avg(ranges, 280, 5);
+    regions["leftBackA"] = avg(ranges, 100, 5);
     regions["right"] = min(ranges, 270, 5);
     regions["left"] = min(ranges, 90, 5);
     regions["rightTurn"] = avg(ranges, 270, 5);
@@ -119,7 +157,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     //if (!noWallRight && (regions["right"] >= anchura_dist) && state == FORWARD) noWallRight = true;
     //if (!noWallLeft && (regions["left"] >= anchura_dist) && state == FORWARD) noWallLeft = true;
 
-    ROS_INFO("noWallLeft:%d, noWallRight:%d", noWallLeft, noWallRight);
+    //ROS_INFO("noWallLeft:%d, noWallRight:%d", noWallLeft, noWallRight);
 }
 
 void follow_wall() {
@@ -127,165 +165,225 @@ void follow_wall() {
     move.linear.x = 0;
     move.angular.z = 0;
     
-    switch (state) {
-	    case FORWARD:  
-	    	
-	    	if (girar) {
+    if (regions["front"] > 0.0) {
+		switch (state) {
+			case FORWARD:  
+			{
+			ros::Time now = ros::Time::now();
+			ros::Duration dt = now - last_update_time;
+			last_update_time = now;
 
-			if (regions["right"] >= anchura_dist) {
-			    state = TURN_RIGHT;
-			    turn90Degree = true;
-			    direccionGiro = "";
-			    turn180Degree = false;
-			    girar = false;
-			    break;
+			if (waiting_after_turn) {
+				if ((now - turn_finish_time).toSec() >= segundosEsperarActivarGirar) {
+					girar = true;
+					waiting_after_turn = false;  
+					ROS_INFO("Ya pasó 1 segundo tras el giro. girar = true;");
+				}
 			}
-
-			else if (regions["left"] >= anchura_dist) {
-			    state = TURN_LEFT;
-			    turn90Degree = true;
-			    direccionGiro = "";
-			    turn180Degree = false;
-			    girar = false;
-			    break;
-			} 
-		}
-		
-		if  (!turn180Degree && regions["45DegreesLeft"] < degrees45Dist && regions["45DegreesRight"] < degrees45Dist && regions["right"] < anchura_dist && regions["left"] < anchura_dist && regions["frontTurn"] < go_back_dist && regions["left"] < anchura_dist && regions["right"] < anchura_dist) {
-			/*state = GO_BACK;*/
-			turn180Degree = true;
-			velocity = -velocity;
-			direccionGiro = "";
-			break;
 			
-		}
-
-		if (velocity > 0.0) {
-			if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
-
-				move.angular.z = -correccion_angular;
-				if (regions["front"] > segurity_dist_acercar) {
-						direccionGiro = "derecha";
-					}
-
-				ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
+			if (turn180Degree && (((regions["rightA"] >= anchura_dist) && (regions["leftA"] >= anchura_dist)) || ((regions["rightA"] >= anchura_dist) && (regions["backA"] >= anchura_dist)) ||((regions["leftA"] >= anchura_dist) && (regions["backA"] >= anchura_dist)))) {
+				turn180Degree = false;
+				velocity = -velocity;
+				velocity_turn = -velocity_turn;
+				velocidad_angular = -velocidad_angular;
+				
+				
 			}
-			else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+				
+			
+			if (girar) {
+				
+				if (regions["rightA"] >= anchura_dist) {
+				//if (regions["rightA"] >= anchura_dist && regions["rightFrontA"] >= anchura_dist && regions["rightBackA"] >= anchura_dist) {
+				//if (regions["rightA"] >= anchura_dist && num_angulos_right >= num_angulos_cumplidos) {
+					state = TURN_RIGHT;
+					turn90Degree = true;
+					direccionGiro = "";
+					turn180Degree = false;
+					girar = false;
+					break;
+				}
+				
+				else if (regions["leftA"] >= anchura_dist) {
+				//else if (regions["leftA"] >= anchura_dist && regions["leftFrontA"] >= anchura_dist && regions["leftBackA"] >= anchura_dist) {
+				//else if (regions["leftA"] >= anchura_dist && num_angulos_right >= num_angulos_cumplidos) {
+					state = TURN_LEFT;
+					turn90Degree = true;
+					direccionGiro = "";
+					turn180Degree = false;
+					girar = false;
+					break;
+				}
+				
+				ROS_INFO("girar:  leftA:%f, leftFrontA:%f, leftBackA:%f, rightA:%f, rightFrontA:%f, rightBackA:%f", regions["leftA"], regions["leftFrontA"], regions["leftBackA"], regions["rightA"], regions["rightFrontA"], regions["rightBackA"]);
+				 
+			}
+			
+			if  (!turn180Degree && regions["45DegreesLeft"] < degrees45Dist && regions["45DegreesRight"] < degrees45Dist && (regions["rightA"] < anchura_dist) && (regions["leftA"] < anchura_dist) && regions["frontTurn"] < go_back_dist) {
+				/*state = GO_BACK;*/
+				turn180Degree = true;
+				velocity = -velocity;
+				velocity_turn = -velocity_turn;
+				velocidad_angular = -velocidad_angular;
+				direccionGiro = "";
+				ROS_INFO("GO_BACK");
+				break;
+				
+			}
+			
+			
 
-				move.angular.z = correccion_angular;
-				if (regions["front"] > segurity_dist_acercar) {
-						direccionGiro = "izquierda";
+			if (velocity > 0.0) {
+				if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha" && (regions["rightFront"] < anchura_dist) && (regions["leftFront"] < wall_dist)) {
+
+					move.angular.z = -correccion_angular;
+					if (regions["front"] > segurity_dist_acercar && regions["frontLeft"] > segurityLeftFront) {
+							direccionGiro = "derecha";
+						}
+
+					ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+				}
+				else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda"  && (regions["leftFront"] < anchura_dist) && (regions["rightFront"] < wall_dist)) {
+
+					move.angular.z = correccion_angular;
+					if (regions["front"] > segurity_dist_acercar && regions["frontRight"] > segurityLeftFront) {
+							direccionGiro = "izquierda";
+						}
+
+					ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+				}
+				else {
+					if (regions["front"] < segurity_dist) {
+						direccionGiro = "";
+						ROS_INFO("forward else if +velocity");
 					}
-
-				ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
+					else {
+						if ((regions["rightA"] < anchura_dist) && (regions["leftA"] < anchura_dist)) girar= true;
+						move.angular.z = 0.0;
+						move.linear.x = velocity;
+						ROS_INFO("forward else else +velocity");
+					}
+				}
 			}
 			else {
+				if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
 
-				move.angular.z = 0.0;
-				move.linear.x = velocity;
-				direccionGiro = "";
-				ROS_INFO("forward else +velocity");
+					move.angular.z = correccion_angular;
+					if (regions["front"] > segurity_dist_acercar) {
+							direccionGiro = "derecha";
+						}
+
+					ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+				}
+				else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
+
+					move.angular.z = -correccion_angular;
+					if (regions["front"] > segurity_dist_acercar) {
+							direccionGiro = "izquierda";
+						}
+
+					ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
+
+				}
+				else {
+					if (regions["front"] < segurity_dist) {
+						direccionGiro = "";
+						ROS_INFO("forward else if -velocity");
+					}
+					else {
+						if ((regions["rightA"] < anchura_dist) && (regions["leftA"] < anchura_dist)) girar= true;
+						move.angular.z = 0.0;
+						move.linear.x = velocity;
+						ROS_INFO("forward else else -velocity");
+					}
+				}
+			}
+
+
+			break;  
+			}
+		
+
+			case TURN_LEFT:
+				{
+					
+				
+				if (turn90Degree) {
+					initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+					turn90Degree = false;
+				}
+
+				double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+				double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
+
+				if (fabs(delta_yaw) < (M_PI / 2) - errorGiro90) {
+					move.angular.z = velocidad_angular;
+					move.linear.x = velocity_turn;
+				}
+				else {
+					move.angular.z = 0.0;
+					move.linear.x = 0.0;
+					//goForward10CM = 0.0;
+					//turn_left_substate = DETECT_WALLS;
+					//turn_start_time = ros::Time::now();  
+					direccionGiro = "";
+					//if (velocity < 0.0) velocity = -velocity;
+					state = FORWARD;
+					turn_finish_time = ros::Time::now();
+					waiting_after_turn = true;
+					ROS_INFO("Finished turning. Start going forward...");
+				}
+				ROS_INFO("TURN_LEFT");
+				break;	
+				}
+				
+			 case TURN_RIGHT:
+				{
+					if (turn90Degree) {
+					initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+					turn90Degree = false;
+				}
+
+				double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+				double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
+
+				if (fabs(delta_yaw) < (M_PI / 2) - errorGiro90) {
+					move.angular.z = -velocidad_angular;
+					move.linear.x = velocity_turn;
+				}
+				else {
+					move.angular.z = 0.0;
+					move.linear.x = 0.0;
+					//goForward10CM = 0.0;
+					//turn_left_substate = DETECT_WALLS;
+					//turn_start_time = ros::Time::now();  
+					direccionGiro = "";
+					//if (velocity < 0.0) velocity = -velocity;
+					state = FORWARD;
+					turn_finish_time = ros::Time::now();
+					waiting_after_turn = true;
+					ROS_INFO("Finished turning. Start going forward...");
+				}
+				ROS_INFO("TURN_RIGHT");
+				break;	
+				}
+				
+			/*case TURN_BACK:
+			 {
+				 if (turn180Degree) {
+					initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
+					turn180Degree = false;
+				 }
+			 }*/
 			}
 		}
-		else {
-			if ((regions["rightFront"] > wall_dist + tolerance) && direccionGiro != "derecha") {
-
-				move.angular.z = correccion_angular;
-				if (regions["front"] > segurity_dist_acercar) {
-						direccionGiro = "derecha";
-					}
-
-				ROS_INFO("acercarse derecha, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
-			}
-			else if ((regions["leftFront"] > wall_dist + tolerance) && direccionGiro != "izquierda") {
-
-				move.angular.z = -correccion_angular;
-				if (regions["front"] > segurity_dist_acercar) {
-						direccionGiro = "izquierda";
-					}
-
-				ROS_INFO("acercarse izquierda, moveAngular:%f, direccionGiro: %s", move.angular.z, direccionGiro);
-
-			}
-			else {
-
-				move.angular.z = 0.0;
-				move.linear.x = velocity;
-				direccionGiro = "";
-				ROS_INFO("forward else -velocity");
-			}
-		}
-
-
-		break;  
 	
+	ROS_INFO("front:%f, frontTurn:%f, rightFront:%f, leftFront:%f, right:%f, left:%f, direccionGiro: %s, 45DegDist: %f, 45DegreesLeft:%f. 45DegreesRight:%f, leftA:%f, rightA:%f, backA:%f, frontLeft:%f, frontRight:%f", regions["front"], regions["frontTurn"], regions["rightFront"], regions["leftFront"], regions["right"], regions["left"], direccionGiro.c_str(), degrees45Dist, regions["45DegreesLeft"], regions["45DegreesRight"], regions["leftA"], regions["rightA"], regions["backA"], regions["frontLeft"], regions["frontRight"]);
 
-	    case TURN_LEFT:
-	      	{
-	      		if (turn90Degree) {
-				initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
-				turn90Degree = false;
-			}
-
-			double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
-			double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
-
-			if (fabs(delta_yaw) < (M_PI / 2) - errorGiro90) {
-				move.angular.z = velocidad_angular;
-				move.linear.x = 0.0;
-			}
-			else {
-				move.angular.z = 0.0;
-				goForward10CM = 0.0;
-				turn_left_substate = DETECT_WALLS;
-				turn_start_time = ros::Time::now();  
-				direccionGiro = "";
-				if (velocity < 0.0) velocity = -velocity;
-				ROS_INFO("Finished turning. Start going forward...");
-			}
-			break;	
-	      	}
-	      	
-	     case TURN_RIGHT:
-	      	{
-	      		if (turn90Degree) {
-				initial_yaw = tf::getYaw(current_odom.pose.pose.orientation);
-				turn90Degree = false;
-			}
-
-			double current_yaw = tf::getYaw(current_odom.pose.pose.orientation);
-			double delta_yaw = angles::shortest_angular_distance(initial_yaw, current_yaw);
-
-			if (fabs(delta_yaw) < (M_PI / 2) - errorGiro90) {
-				move.angular.z = -velocidad_angular;
-				move.linear.x = 0.0;
-			}
-			else {
-				move.angular.z = 0.0;
-				goForward10CM = 0.0;
-				turn_left_substate = DETECT_WALLS;
-				turn_start_time = ros::Time::now();  
-				direccionGiro = "";
-				if (velocity < 0.0) velocity = -velocity;
-				ROS_INFO("Finished turning. Start going forward...");
-			}
-			break;	
-	      	}
-
-
-
-
-
-
-
-
-
-
-
-
+	
     movement_pub.publish(move);
 }
 
