@@ -8,15 +8,13 @@
 #include <queue>
 #include <cmath>
 
-// --- GLOBALS ---
 cv::Mat map_img;
 double resolution = 0.05;
 double origin_x = 0.0, origin_y = 0.0;
-cv::Point entrance(150, 150); // Hardcoded entrance in pixel coords (adjust later)
+cv::Point entrance(150, 150);
 bool got_pose = false;
 cv::Point robot_px;
 
-// --- A* STRUCTURES ---
 struct Node {
     cv::Point point;
     float f, g, h;
@@ -66,7 +64,6 @@ std::vector<cv::Point> aStar(const cv::Mat& map, const cv::Point& start, const c
     return {};
 }
 
-// --- LOAD MAP ---
 bool loadMap(const std::string& yaml_path) {
     YAML::Node map = YAML::LoadFile(yaml_path);
     std::string img_file = map["image"].as<std::string>();
@@ -82,7 +79,6 @@ bool loadMap(const std::string& yaml_path) {
     return true;
 }
 
-// --- ROBOT POSE CALLBACK ---
 void poseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg) {
     double rx = msg->pose.pose.position.x;
     double ry = msg->pose.pose.position.y;
